@@ -48,6 +48,7 @@ const OnlineVariationalAnimation = () => {
   const [stepDetailPrevMpc, setStepDetailPrevMpc] = useState(null);
   const [stepDetailTrail, setStepDetailTrail] = useState([{ x: 80, y: 320 }]);
   const [stepDetailTargetTrail, setStepDetailTargetTrail] = useState([computeTargetPosition(0)]);
+  const [stepDetailFirstCycle, setStepDetailFirstCycle] = useState(true);
   const stepDetailAutoRef = useRef(null);
   
   const animationRef = useRef(null);
@@ -189,6 +190,7 @@ const OnlineVariationalAnimation = () => {
       return;
     }
     if (stepDetailSubStep === 4) {
+      setStepDetailFirstCycle(false);
       setStepDetailSubStep(1);
       return;
     }
@@ -204,11 +206,11 @@ const OnlineVariationalAnimation = () => {
 
   useEffect(() => {
     if (viewMode !== 'stepDetail' || !stepDetailAutoAdvance) return;
-    // フレーム進行はゆっくり見せる
-    const id = setTimeout(advanceStepDetail, 300);
+    const intervalMs = stepDetailFirstCycle ? 800 : 300;
+    const id = setTimeout(advanceStepDetail, intervalMs);
     stepDetailAutoRef.current = id;
     return () => clearTimeout(id);
-  }, [viewMode, stepDetailAutoAdvance, stepDetailSubStep, stepDetailState, stepDetailT, advanceStepDetail]);
+  }, [viewMode, stepDetailAutoAdvance, stepDetailSubStep, stepDetailState, stepDetailT, stepDetailFirstCycle, advanceStepDetail]);
 
   const resetStepDetail = useCallback(() => {
     setStepDetailState({ x: 80, y: 320, theta: -Math.PI / 5 });
@@ -217,6 +219,7 @@ const OnlineVariationalAnimation = () => {
     setStepDetailPrevMpc(null);
     setStepDetailTrail([{ x: 80, y: 320 }]);
     setStepDetailTargetTrail([getTargetPosition(0)]);
+    setStepDetailFirstCycle(true);
   }, []);
 
   useEffect(() => {
