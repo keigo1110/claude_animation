@@ -341,14 +341,49 @@ export default function FeedbackAssociativeMemoryClean() {
       `C ${feedbackLoop.p4.x} ${feedbackLoop.p4.y}, ${feedbackLoop.p5.x} ${feedbackLoop.p5.y}, ${feedbackLoop.p6.x} ${feedbackLoop.p6.y}`,
     [feedbackLoop]
   );
+  const feedbackPointAt = useCallback(
+    (s) => {
+      if (s <= 0.5) {
+        const u = s * 2;
+        return cubicBezierPoint(feedbackLoop.p0, feedbackLoop.p1, feedbackLoop.p2, feedbackLoop.p3, u);
+      }
+      const u = (s - 0.5) * 2;
+      return cubicBezierPoint(feedbackLoop.p3, feedbackLoop.p4, feedbackLoop.p5, feedbackLoop.p6, u);
+    },
+    [feedbackLoop]
+  );
   const feedbackBall = useMemo(() => {
-    if (feedbackPhase <= 0.5) {
-      const u = feedbackPhase * 2;
-      return cubicBezierPoint(feedbackLoop.p0, feedbackLoop.p1, feedbackLoop.p2, feedbackLoop.p3, u);
-    }
-    const u = (feedbackPhase - 0.5) * 2;
-    return cubicBezierPoint(feedbackLoop.p3, feedbackLoop.p4, feedbackLoop.p5, feedbackLoop.p6, u);
-  }, [feedbackPhase, feedbackLoop]);
+    return feedbackPointAt(feedbackPhase);
+  }, [feedbackPhase, feedbackPointAt]);
+  const feedbackNoisePoints = useMemo(() => {
+    const seeds = [0.08, 0.16, 0.24, 0.36, 0.48, 0.62, 0.74, 0.86];
+    return seeds.map((s, i) => {
+      const base = feedbackPointAt(s);
+      const phase = feedbackPhase * Math.PI * 2;
+      const angle = 2 * Math.PI * (s + 0.12 * Math.sin(step * 0.6 + i));
+      const radius = 2.2 + 1.6 * Math.sin(phase + i);
+      return {
+        x: base.x + radius * Math.cos(angle),
+        y: base.y + radius * Math.sin(angle),
+        a: 0.25 + 0.25 * Math.sin(phase + i * 1.3),
+      };
+    });
+  }, [feedbackPointAt, feedbackPhase, step]);
+  const interferenceArrow = useMemo(() => {
+    const source = { x: 900, y: 320 };
+    const target = feedbackPointAt(0.28);
+    const phase = feedbackPhase;
+    const tIn = clamp(phase, 0, 1);
+    return {
+      sx: source.x,
+      sy: source.y,
+      tx: target.x,
+      ty: target.y,
+      px: lerp(source.x, target.x, tIn),
+      py: lerp(source.y, target.y, tIn),
+      a: 0.25 + 0.55 * Math.sin(phase * Math.PI),
+    };
+  }, [feedbackPointAt, feedbackPhase]);
 
   return (
     <div
@@ -435,7 +470,7 @@ export default function FeedbackAssociativeMemoryClean() {
         {/* background card */}
         <rect x="22" y="74" width={W - 44} height={H - 96} rx="18" fill="rgba(34,18,12,0.88)" stroke="rgba(220,130,70,0.24)" />
         <text x="44" y="112" fill="rgba(255,210,170,0.95)" fontSize="15" fontWeight="900">
-          連想記憶
+          ネガティブフィードバック
         </text>
 
         {/* left: cue */}
@@ -470,6 +505,44 @@ export default function FeedbackAssociativeMemoryClean() {
           markerStart="url(#feedbackArrowSmall)"
           markerEnd="url(#feedbackArrow)"
         />
+        {/* subtle noise around feedback loop */}
+        {feedbackNoisePoints.map((p, i) => (
+          <circle
+            key={`fb-noise-${i}`}
+            cx={p.x}
+            cy={p.y}
+            r={2}
+            fill={`rgba(255,210,150,${0.25 + 0.35 * p.a})`}
+          />
+        ))}
+        {/* single conceptual interference arrow merging into the loop */}
+        <g opacity={0.85}>
+          <line
+            x1={interferenceArrow.sx}
+            y1={interferenceArrow.sy}
+            x2={interferenceArrow.tx}
+            y2={interferenceArrow.ty}
+            stroke={`rgba(255,150,90,${0.25 + 0.35 * interferenceArrow.a})`}
+            strokeWidth="2"
+            markerEnd="url(#feedbackArrowSmall)"
+          />
+          <text
+            x={interferenceArrow.sx - 10}
+            y={interferenceArrow.sy - 12}
+            textAnchor="end"
+            fill="rgba(255,200,150,0.85)"
+            fontSize="13"
+            fontWeight="700"
+          >
+            ノイズ
+          </text>
+          <circle
+            cx={interferenceArrow.px}
+            cy={interferenceArrow.py}
+            r={3.4}
+            fill={`rgba(255,170,110,${0.35 + 0.45 * interferenceArrow.a})`}
+          />
+        </g>
         {/* feedback "information" ball */}
         <circle
           cx={feedbackBall.x}
@@ -486,14 +559,14 @@ export default function FeedbackAssociativeMemoryClean() {
 
         {/* energy landscape */}
         <g>
-          <text x={energyBox.x} y={energyBox.y - 8} fill="rgba(255,255,255,0.78)" fontSize="13" fontWeight="900">
-            エネルギー地形：更新ごとに谷（安定点）へ
+          <text x={energyBox.x} y={energyBox.y - 5} fill="rgba(255,255,255,0.78)" fontSize="13" fontWeight="900">
+            更新ごとに谷（安定点）へ
           </text>
           <rect
-            x={energyBox.x - 18}
+            x={energyBox.x - 20}
             y={energyBox.y - 22}
             width={energyBox.w + 36}
-            height={energyBox.h + 20}
+            height={energyBox.h + 70}
             rx="16"
             fill="rgba(0,0,0,0.18)"
             stroke="rgba(255,255,255,0.10)"
