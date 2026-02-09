@@ -98,6 +98,7 @@ export default function FeedbackAssociativeMemoryClean() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasFinished, setHasFinished] = useState(false);
   const [step, setStep] = useState(0);
+  const [mode, setMode] = useState("negative");
   const timerRef = useRef(null);
   const feedbackRafRef = useRef(null);
   const feedbackStartRef = useRef(0);
@@ -245,6 +246,47 @@ export default function FeedbackAssociativeMemoryClean() {
     return g;
   }, [cue, target, step]);
 
+  const isPositive = mode === "positive";
+  const positiveT = isPositive ? clamp((step + feedbackPhase) / (STEPS - 1), 0, 1) : 0;
+  const modeLabel = isPositive ? "ポジティブフィードバック" : "ネガティブフィードバック";
+  const modeDescription = isPositive
+    ? "増幅が自己強化され、複数の安定点が生まれて新しいパターンが創発する"
+    : "反復更新で energy が下がり、単一の谷（安定点）に収束して補完される";
+  const amplifiedGrid = useMemo(
+    () =>
+      stateGrid.map((row) =>
+        row.map((v) => clamp(v + 0.25 * positiveT + (v > 0.2 ? 0.08 * positiveT : 0)))
+      ),
+    [stateGrid, positiveT]
+  );
+  const emergentPattern = useMemo(
+    () => [
+      [1, 1, 0, 1, 1],
+      [1, 0, 1, 0, 1],
+      [0, 1, 1, 1, 0],
+      [1, 0, 1, 0, 1],
+      [1, 1, 0, 1, 1],
+    ],
+    []
+  );
+  const memoryIcons = useMemo(() => {
+    if (!isPositive) return memories;
+    return [...memories, emergentPattern];
+  }, [isPositive, memories, emergentPattern]);
+  const emergentMemoryGrid = useMemo(() => {
+    if (!isPositive) {
+      return target.map((row) => row.map((v) => (v ? 0.95 : 0.06)));
+    }
+    const ease = clamp(positiveT * positiveT * 1.15, 0, 1);
+    return target.map((row, r) =>
+      row.map((v, c) => {
+        const base = v ? 0.95 : 0.06;
+        const em = emergentPattern[r][c] ? 0.98 : 0.04;
+        return lerp(base, em, ease);
+      })
+    );
+  }, [isPositive, target, emergentPattern, positiveT]);
+
   // ===== energy landscape (no waves, no jitter) =====
   const wells = useMemo(
     () => [
@@ -258,7 +300,7 @@ export default function FeedbackAssociativeMemoryClean() {
 
   const energyWells = useMemo(() => {
     const phase = isPlaying ? feedbackPhase : 0;
-    return wells.map((w, i) => {
+    const base = wells.map((w, i) => {
       const drift = 0.003 * Math.sin(0.75 * step + i * 1.3 + phase * Math.PI * 1.5);
       const ampShift = 1 + 0.022 * Math.sin(0.55 * step + i * 1.7 + phase * Math.PI);
       const widthShift = 1 + 0.02 * Math.cos(0.45 * step + i * 1.1 - phase * Math.PI);
@@ -268,7 +310,23 @@ export default function FeedbackAssociativeMemoryClean() {
         amp: w.amp * ampShift,
       };
     });
-  }, [wells, step, feedbackPhase, isPlaying]);
+
+    if (!isPositive) return base;
+
+    const spread = positiveT;
+    const amplified = base.map((w, i) => {
+      const widen = 1 + 0.25 * spread;
+      const flatten = 1 - (i === 3 ? 0.05 : 0.20) * spread;
+      const shift = 0.006 * Math.sin(step * 0.5 + i);
+      return {
+        mu: w.mu + shift,
+        width: w.width * (i === 3 ? 0.85 : widen),
+        amp: w.amp * flatten,
+      };
+    });
+    const emergent = [{ mu: 0.98, width: 0.045, amp: -1.20 * spread }];
+    return [...amplified, ...emergent];
+  }, [wells, step, feedbackPhase, isPlaying, isPositive, positiveT]);
 
   const curve = useMemo(() => buildEnergyCurve(energyWells), [energyWells]);
   // 表示用: 谷を下・山を上にする（En は低E=小→谷なので、1-En で y は下が正の SVG で谷が下に）
@@ -276,6 +334,18 @@ export default function FeedbackAssociativeMemoryClean() {
 
   const W = 960;
   const H = 670;
+
+  const gridCell = 20;
+  const gridY = 150;
+  const cueX = 120;
+  const stateX = 430;
+  const memoryX = 740;
+  const gridSize = gridCell * 5 + 20;
+  const arrowY = gridY + 40;
+  const cueRight = cueX + gridCell * 5 + 10;
+  const stateLeft = stateX - 10;
+  const stateRight = stateX + gridCell * 5 + 10;
+  const memoryLeft = memoryX - 10;
 
   const energyBox = { x: 50, y: 370, w: 860, h: 220 };
   const energyTopPad = 26;
@@ -297,7 +367,8 @@ export default function FeedbackAssociativeMemoryClean() {
   // ball moves monotonically along one valley side: s(t) from 0.58 -> 0.68
   const s0 = 0.58;
   const s1 = 0.68;
-  const sNow = lerp(s0, s1, t);
+  const s1Positive = 0.98;
+  const sNow = lerp(s0, isPositive ? s1Positive : s1, t);
 
   const ballXY = useMemo(() => {
     const idx = Math.round(sNow * 220);
@@ -322,18 +393,19 @@ export default function FeedbackAssociativeMemoryClean() {
   }, [energyWells, EnDisplay, energyBox.x, energyBox.y, energyBox.w, energyH]);
 
   const loopPulse = isPlaying ? 0.35 + 0.65 * (step % 2) : 0.35;
-  const feedbackLoop = useMemo(
-    () => ({
-      p0: { x: 550, y: 210 },
-      p1: { x: 620, y: 260 },
-      p2: { x: 620, y: 330 },
-      p3: { x: 480, y: 336 },
-      p4: { x: 340, y: 330 },
-      p5: { x: 340, y: 260 },
-      p6: { x: 410, y: 210 },
-    }),
-    []
-  );
+  const feedbackLoop = useMemo(() => {
+    const cx = stateX + (gridCell * 5) / 2;
+    const cy = gridY + (gridCell * 5) / 2;
+    return {
+      p0: { x: cx + 70, y: cy + 10 },
+      p1: { x: cx + 140, y: cy + 60 },
+      p2: { x: cx + 140, y: cy + 130 },
+      p3: { x: cx, y: cy + 136 },
+      p4: { x: cx - 140, y: cy + 130 },
+      p5: { x: cx - 140, y: cy + 60 },
+      p6: { x: cx - 70, y: cy + 10 },
+    };
+  }, [stateX, gridY, gridCell]);
   const feedbackPathD = useMemo(
     () =>
       `M ${feedbackLoop.p0.x} ${feedbackLoop.p0.y} ` +
@@ -370,8 +442,9 @@ export default function FeedbackAssociativeMemoryClean() {
     });
   }, [feedbackPointAt, feedbackPhase, step]);
   const interferenceArrow = useMemo(() => {
-    const source = { x: 900, y: 320 };
-    const target = feedbackPointAt(0.28);
+    const target = feedbackPointAt(0.32);
+    const rawSourceX = memoryX + gridSize + 90;
+    const source = { x: lerp(rawSourceX, target.x, 0.5), y: target.y };
     const phase = feedbackPhase;
     const tIn = clamp(phase, 0, 1);
     return {
@@ -383,7 +456,7 @@ export default function FeedbackAssociativeMemoryClean() {
       py: lerp(source.y, target.y, tIn),
       a: 0.25 + 0.55 * Math.sin(phase * Math.PI),
     };
-  }, [feedbackPointAt, feedbackPhase]);
+  }, [feedbackPointAt, feedbackPhase, memoryX, gridSize, gridY]);
 
   return (
     <div
@@ -436,9 +509,41 @@ export default function FeedbackAssociativeMemoryClean() {
             </>
           )}
         </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 4, background: "rgba(255,255,255,0.06)", borderRadius: 16 }}>
+          <button
+            onClick={() => setMode("negative")}
+            style={{
+              background: mode === "negative" ? "rgba(255,210,170,0.95)" : "transparent",
+              color: mode === "negative" ? "#2a1a12" : "rgba(255,255,255,0.75)",
+              border: "none",
+              padding: "6px 12px",
+              borderRadius: 12,
+              fontSize: 12,
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            ネガティブ
+          </button>
+          <button
+            onClick={() => setMode("positive")}
+            style={{
+              background: mode === "positive" ? "rgba(255,210,170,0.95)" : "transparent",
+              color: mode === "positive" ? "#2a1a12" : "rgba(255,255,255,0.75)",
+              border: "none",
+              padding: "6px 12px",
+              borderRadius: 12,
+              fontSize: 12,
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            ポジティブ
+          </button>
+        </div>
 
         <div style={{ fontSize: 14, color: "rgba(255,255,255,0.80)" }}>
-          反復更新（feedback）で energy が下がり、谷（安定点）に収束 → 欠けた情報が補完される（連想）
+          {modeDescription}
         </div>
 
         <div style={{ marginLeft: "auto", fontSize: 13, color: "rgba(255,255,255,0.55)" }}>
@@ -470,21 +575,24 @@ export default function FeedbackAssociativeMemoryClean() {
         {/* background card */}
         <rect x="22" y="74" width={W - 44} height={H - 96} rx="18" fill="rgba(34,18,12,0.88)" stroke="rgba(220,130,70,0.24)" />
         <text x="44" y="112" fill="rgba(255,210,170,0.95)" fontSize="15" fontWeight="900">
-          ネガティブフィードバック
+          {modeLabel}
         </text>
 
         {/* left: cue */}
-        <PixelGrid x={120} y={150} cell={20} grid={cue.map(row => row.map(v => (v === -1 ? 0.10 : v ? 0.85 : 0.06)))} label="外界情報" accent="rgba(255,200,150,1)" glow={0.1} />
+        <PixelGrid x={cueX} y={gridY} cell={gridCell} grid={cue.map(row => row.map(v => (v === -1 ? 0.10 : v ? 0.85 : 0.06)))} label="外界情報" accent="rgba(255,200,150,1)" glow={0.1} />
 
         {/* middle: state */}
-        <PixelGrid x={430} y={150} cell={20} grid={stateGrid} label={step < 2 ? "状態（初期）" : "状態（反復で更新）"} accent="rgba(255,220,180,1)" glow={isPlaying ? 0.6 : hasFinished ? 0.8 : 0.2} />
+        <PixelGrid x={stateX} y={gridY} cell={gridCell} grid={stateGrid} label={step < 2 ? "状態（初期）" : "状態（反復で更新）"} accent="rgba(255,220,180,1)" glow={isPlaying ? 0.6 : hasFinished ? 0.8 : 0.2} />
+        {isPositive && null}
 
         {/* right: converged memory */}
-        <PixelGrid x={740} y={150} cell={20} grid={target.map(row => row.map(v => (v ? 0.95 : 0.06)))} label="記憶（安定点）" accent="rgba(255,20,210,1)" glow={hasFinished ? 0.9 : 0.2} />
+        <PixelGrid x={memoryX} y={gridY} cell={gridCell} grid={emergentMemoryGrid} label={isPositive ? "記憶（新パターン生成）" : "記憶（安定点）"} accent="rgba(255,240,210,1)" glow={hasFinished ? 0.9 : 0.2} />
+        {isPositive && null}
 
         {/* arrows */}
-        <line x1={250} y1={190} x2={410} y2={190} stroke="rgba(255,200,150,0.65)" strokeWidth="2.4" markerEnd="url(#arrow)" />
-        <line x1={560} y1={190} x2={720} y2={190} stroke={`rgba(255,220,180,${0.25 + 0.60 * t})`} strokeWidth="2.4" markerEnd="url(#arrow)" />
+        <line x1={cueRight} y1={arrowY} x2={stateLeft} y2={arrowY} stroke="rgba(255,200,150,0.65)" strokeWidth="2.4" markerEnd="url(#arrow)" />
+        <line x1={stateRight} y1={arrowY} x2={memoryLeft} y2={arrowY} stroke={`rgba(255,220,180,${0.25 + 0.60 * t})`} strokeWidth="2.4" markerEnd="url(#arrow)" />
+        {isPositive && null}
 
         {/* feedback loop：前向き矢印(y=190)・グリッドと重ならないようループを下に大きく取り、縁取りで視認性確保 */}
         <path
@@ -527,9 +635,9 @@ export default function FeedbackAssociativeMemoryClean() {
             markerEnd="url(#feedbackArrowSmall)"
           />
           <text
-            x={interferenceArrow.sx - 10}
-            y={interferenceArrow.sy - 12}
-            textAnchor="end"
+            x={interferenceArrow.sx + 10}
+            y={interferenceArrow.sy - 6}
+            textAnchor="start"
             fill="rgba(255,200,150,0.85)"
             fontSize="13"
             fontWeight="700"
@@ -560,7 +668,7 @@ export default function FeedbackAssociativeMemoryClean() {
         {/* energy landscape */}
         <g>
           <text x={energyBox.x} y={energyBox.y - 5} fill="rgba(255,255,255,0.78)" fontSize="13" fontWeight="900">
-            更新ごとに谷（安定点）へ
+            {isPositive ? "増幅により地形が広がり、新しい谷が生まれる" : "更新ごとに谷（安定点）へ"}
           </text>
           <rect
             x={energyBox.x - 20}
@@ -575,7 +683,7 @@ export default function FeedbackAssociativeMemoryClean() {
 
           {/* 各谷の位置の下側に記憶の記号を配置（曲線と重ならないよう下にオフセット） */}
           {valleyDots.map((v, i) => {
-            const m = memories[i];
+            const m = memoryIcons[i] || memoryIcons[memoryIcons.length - 1];
             const cell = 6;
             const pad = 3;
             const box = pad * 2 + cell * 5;
