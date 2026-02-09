@@ -262,23 +262,48 @@ export default function FeedbackAssociativeMemoryClean() {
     ],
     []
   );
-  const amplifiedGrid = useMemo(
-    () =>
-      stateGrid.map((row) =>
-        row.map((v) => clamp(v + 0.25 * positiveT + (v > 0.2 ? 0.08 * positiveT : 0)))
-      ),
-    [stateGrid, positiveT]
+  const arrowPattern = useMemo(
+    () => [
+      [0, 0, 1, 0, 0],
+      [0, 1, 1, 1, 0],
+      [1, 0, 1, 0, 1],
+      [0, 0, 1, 0, 0],
+      [0, 0, 1, 0, 0],
+    ],
+    []
+  );
+  const targetGrid = useMemo(
+    () => target.map((row) => row.map((v) => (v ? 0.95 : 0.06))),
+    [target]
+  );
+  const arrowGrid = useMemo(
+    () => arrowPattern.map((row) => row.map((v) => (v ? 0.98 : 0.04))),
+    [arrowPattern]
+  );
+  const emergentGrid = useMemo(
+    () => emergentPattern.map((row) => row.map((v) => (v ? 0.98 : 0.04))),
+    [emergentPattern]
   );
   const stateDisplayGrid = useMemo(() => {
     if (!isPositive) return stateGrid;
-    const ease = clamp(positiveT * positiveT * 1.1, 0, 1);
-    return stateGrid.map((row, r) =>
-      row.map((v, c) => {
-        const em = emergentPattern[r][c] ? 0.98 : 0.04;
-        return lerp(v, em, ease);
-      })
+    const s = step + feedbackPhase; // continuous iteration
+    if (s <= 2) {
+      const u = clamp(s / 2, 0, 1);
+      return stateGrid.map((row, r) =>
+        row.map((v, c) => lerp(v, targetGrid[r][c], u))
+      );
+    }
+    if (s <= 5) {
+      const u = clamp((s - 2) / 3, 0, 1);
+      return targetGrid.map((row, r) =>
+        row.map((v, c) => lerp(v, arrowGrid[r][c], u))
+      );
+    }
+    const u = clamp((s - 5) / 3, 0, 1);
+    return arrowGrid.map((row, r) =>
+      row.map((v, c) => lerp(v, emergentGrid[r][c], u))
     );
-  }, [isPositive, stateGrid, emergentPattern, positiveT]);
+  }, [isPositive, stateGrid, targetGrid, arrowGrid, emergentGrid, step, feedbackPhase]);
   const memoryIcons = useMemo(() => {
     if (!isPositive) return memories;
     return [...memories, emergentPattern];
@@ -678,7 +703,7 @@ export default function FeedbackAssociativeMemoryClean() {
         {/* energy landscape */}
         <g>
           <text x={energyBox.x} y={energyBox.y - 5} fill="rgba(255,255,255,0.78)" fontSize="13" fontWeight="900">
-            {isPositive ? "増幅により地形が広がり、新しい谷が生まれる" : "更新ごとに谷（安定点）へ"}
+            {isPositive ? "地形が広がり、新しい谷が生まれる" : "更新ごとに谷（安定点）へ"}
           </text>
           <rect
             x={energyBox.x - 20}
