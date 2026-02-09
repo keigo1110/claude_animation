@@ -252,13 +252,6 @@ export default function FeedbackAssociativeMemoryClean() {
   const modeDescription = isPositive
     ? "増幅が自己強化され、複数の安定点が生まれて新しいパターンが創発する"
     : "反復更新で energy が下がり、単一の谷（安定点）に収束して補完される";
-  const amplifiedGrid = useMemo(
-    () =>
-      stateGrid.map((row) =>
-        row.map((v) => clamp(v + 0.25 * positiveT + (v > 0.2 ? 0.08 * positiveT : 0)))
-      ),
-    [stateGrid, positiveT]
-  );
   const emergentPattern = useMemo(
     () => [
       [1, 1, 0, 1, 1],
@@ -269,6 +262,23 @@ export default function FeedbackAssociativeMemoryClean() {
     ],
     []
   );
+  const amplifiedGrid = useMemo(
+    () =>
+      stateGrid.map((row) =>
+        row.map((v) => clamp(v + 0.25 * positiveT + (v > 0.2 ? 0.08 * positiveT : 0)))
+      ),
+    [stateGrid, positiveT]
+  );
+  const stateDisplayGrid = useMemo(() => {
+    if (!isPositive) return stateGrid;
+    const ease = clamp(positiveT * positiveT * 1.1, 0, 1);
+    return stateGrid.map((row, r) =>
+      row.map((v, c) => {
+        const em = emergentPattern[r][c] ? 0.98 : 0.04;
+        return lerp(v, em, ease);
+      })
+    );
+  }, [isPositive, stateGrid, emergentPattern, positiveT]);
   const memoryIcons = useMemo(() => {
     if (!isPositive) return memories;
     return [...memories, emergentPattern];
@@ -582,7 +592,7 @@ export default function FeedbackAssociativeMemoryClean() {
         <PixelGrid x={cueX} y={gridY} cell={gridCell} grid={cue.map(row => row.map(v => (v === -1 ? 0.10 : v ? 0.85 : 0.06)))} label="外界情報" accent="rgba(255,200,150,1)" glow={0.1} />
 
         {/* middle: state */}
-        <PixelGrid x={stateX} y={gridY} cell={gridCell} grid={stateGrid} label={step < 2 ? "状態（初期）" : "状態（反復で更新）"} accent="rgba(255,220,180,1)" glow={isPlaying ? 0.6 : hasFinished ? 0.8 : 0.2} />
+        <PixelGrid x={stateX} y={gridY} cell={gridCell} grid={stateDisplayGrid} label={step < 2 ? "状態（初期）" : "状態（反復で更新）"} accent="rgba(255,220,180,1)" glow={isPlaying ? 0.6 : hasFinished ? 0.8 : 0.2} />
         {isPositive && null}
 
         {/* right: converged memory */}
