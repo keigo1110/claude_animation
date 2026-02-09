@@ -256,7 +256,21 @@ export default function FeedbackAssociativeMemoryClean() {
     []
   );
 
-  const curve = useMemo(() => buildEnergyCurve(wells), [wells]);
+  const energyWells = useMemo(() => {
+    const phase = isPlaying ? feedbackPhase : 0;
+    return wells.map((w, i) => {
+      const drift = 0.003 * Math.sin(0.75 * step + i * 1.3 + phase * Math.PI * 1.5);
+      const ampShift = 1 + 0.022 * Math.sin(0.55 * step + i * 1.7 + phase * Math.PI);
+      const widthShift = 1 + 0.02 * Math.cos(0.45 * step + i * 1.1 - phase * Math.PI);
+      return {
+        mu: w.mu + drift,
+        width: w.width * widthShift,
+        amp: w.amp * ampShift,
+      };
+    });
+  }, [wells, step, feedbackPhase, isPlaying]);
+
+  const curve = useMemo(() => buildEnergyCurve(energyWells), [energyWells]);
   // 表示用: 谷を下・山を上にする（En は低E=小→谷なので、1-En で y は下が正の SVG で谷が下に）
   const EnDisplay = useMemo(() => curve.En.map((e) => 1 - e), [curve.En]);
 
@@ -296,7 +310,7 @@ export default function FeedbackAssociativeMemoryClean() {
   }, [sNow, EnDisplay, energyBox.x, energyBox.y, energyBox.w, energyH]);
 
   const valleyDots = useMemo(() => {
-    return wells.map((w) => {
+    return energyWells.map((w) => {
       const idx = Math.round(w.mu * 220);
       const x = energyBox.x + w.mu * energyBox.w;
       const y =
@@ -305,7 +319,7 @@ export default function FeedbackAssociativeMemoryClean() {
         EnDisplay[clamp(idx, 0, EnDisplay.length - 1)] * energyH;
       return { x, y };
     });
-  }, [wells, EnDisplay, energyBox.x, energyBox.y, energyBox.w, energyH]);
+  }, [energyWells, EnDisplay, energyBox.x, energyBox.y, energyBox.w, energyH]);
 
   const loopPulse = isPlaying ? 0.35 + 0.65 * (step % 2) : 0.35;
   const feedbackLoop = useMemo(
@@ -425,13 +439,13 @@ export default function FeedbackAssociativeMemoryClean() {
         </text>
 
         {/* left: cue */}
-        <PixelGrid x={120} y={150} cell={20} grid={cue.map(row => row.map(v => (v === -1 ? 0.10 : v ? 0.85 : 0.06)))} label="手がかり" accent="rgba(255,200,150,1)" glow={0.1} />
+        <PixelGrid x={120} y={150} cell={20} grid={cue.map(row => row.map(v => (v === -1 ? 0.10 : v ? 0.85 : 0.06)))} label="外界情報" accent="rgba(255,200,150,1)" glow={0.1} />
 
         {/* middle: state */}
         <PixelGrid x={430} y={150} cell={20} grid={stateGrid} label={step < 2 ? "状態（初期）" : "状態（反復で更新）"} accent="rgba(255,220,180,1)" glow={isPlaying ? 0.6 : hasFinished ? 0.8 : 0.2} />
 
         {/* right: converged memory */}
-        <PixelGrid x={740} y={150} cell={20} grid={target.map(row => row.map(v => (v ? 0.95 : 0.06)))} label="谷の底（安定点＝記憶）" accent="rgba(255,20,210,1)" glow={hasFinished ? 0.9 : 0.2} />
+        <PixelGrid x={740} y={150} cell={20} grid={target.map(row => row.map(v => (v ? 0.95 : 0.06)))} label="記憶（安定点）" accent="rgba(255,20,210,1)" glow={hasFinished ? 0.9 : 0.2} />
 
         {/* arrows */}
         <line x1={250} y1={190} x2={410} y2={190} stroke="rgba(255,200,150,0.65)" strokeWidth="2.4" markerEnd="url(#arrow)" />
