@@ -9,8 +9,20 @@ export const animationMeta = {
 // ===== tiny helpers =====
 const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const lerp = (a, b, t) => a + (b - a) * t;
+const smoothstep = (u) => {
+  const t = clamp(u, 0, 1);
+  return t * t * (3 - 2 * t);
+};
+const sampleLinear = (arr, t01) => {
+  const n = arr.length - 1;
+  const p = clamp(t01, 0, 1) * n;
+  const i0 = Math.floor(p);
+  const i1 = Math.min(i0 + 1, n);
+  const u = p - i0;
+  return lerp(arr[i0], arr[i1], u);
+};
 
-function buildEnergyCurve(wells) {
+function buildEnergyCurve(wells, normRange = null) {
   // E(s) = base + sum amp*exp(-((s-mu)^2)/(2*w^2)), amp negative => valley
   const N = 220;
   const xs = [];
@@ -28,8 +40,10 @@ function buildEnergyCurve(wells) {
   }
   const Emin = Math.min(...Es);
   const Emax = Math.max(...Es);
-  const En = Es.map((v) => (v - Emin) / (Emax - Emin + 1e-9)); // 0..1
-  return { xs, En };
+  const nMin = normRange?.min ?? Emin;
+  const nMax = normRange?.max ?? Emax;
+  const En = Es.map((v) => (v - nMin) / (nMax - nMin + 1e-9)); // 0..1
+  return { xs, En, Emin, Emax };
 }
 
 function pathFromCurve(xs, ys, x0, y0, w, h) {
@@ -163,6 +177,8 @@ export default function FeedbackAssociativeMemoryClean() {
 
   const t = step / (STEPS - 1); // 0..1
   const iterProgress = step + feedbackPhase;
+  const arrowPhaseGlobal = smoothstep((iterProgress - 3.2) / 2.8);
+  const emergentPhaseGlobal = smoothstep((iterProgress - 4.8) / 3.2);
 
   // ===== fixed “memories” (5x5) =====
   const memories = useMemo(() => {
@@ -338,8 +354,6 @@ export default function FeedbackAssociativeMemoryClean() {
     if (!isPositive) return wells;
 
     const phase = isPlaying ? feedbackPhase : 0;
-    const arrowPhase = clamp((iterProgress - 3) / 3, 0, 1);
-    const emergentPhase = clamp((iterProgress - 6) / 2, 0, 1);
     const base = wells.map((w, i) => {
       const drift = 0.003 * Math.sin(0.75 * step + i * 1.3 + phase * Math.PI * 1.5);
       const ampShift = 1 + 0.022 * Math.sin(0.55 * step + i * 1.7 + phase * Math.PI);
@@ -353,27 +367,45 @@ export default function FeedbackAssociativeMemoryClean() {
 
     const spread = positiveT;
     const amplified = base.map((w, i) => {
-      const widen = i === targetIdx ? 1 + 0.28 * spread : 1 + 0.12 * spread;
-      const shift = 0.006 * Math.sin(step * 0.5 + i);
+      const widen =
+        i < 2
+          ? 1 + 0.02 * spread // 左2谷は軽く揺れるだけ
+          : i === targetIdx
+            ? 1 + 0.28 * spread
+            : 1 + 0.12 * spread;
+      const shift = (i < 2 ? 0.0025 : 0.006) * Math.sin(step * 0.5 + i);
       const depthScaleBase =
         i === targetIdx
           ? 1 - 0.58 * spread // 元の正解谷は明確に浅くする
           : i === 3
             ? 1 - 0.08 * spread // 矢印谷は軽微に弱めるだけ
-            : 1 - 0.18 * spread; // 競合谷は相対的に弱める
-      const arrowBoost = i === 3 ? 1 + 0.62 * arrowPhase : 1;
-      const arrowNarrow = i === 3 ? 1 - 0.18 * arrowPhase : 1;
+            : 1; // 左側の既存谷は維持（不要に浅くしない）
+      const arrowBoost = i === 3 ? 1 + 0.62 * arrowPhaseGlobal : 1;
+      const arrowNarrow = i === 3 ? 1 - 0.18 * arrowPhaseGlobal : 1;
       return {
         mu: w.mu + shift,
         width: w.width * (i === 3 ? 0.85 * arrowNarrow : widen),
         amp: w.amp * depthScaleBase * arrowBoost,
       };
     });
-    const emergent = [{ mu: 0.98, width: 0.04, amp: -1.35 * emergentPhase }];
+    const emergent = [{ mu: 0.98, width: 0.04, amp: -1.35 * emergentPhaseGlobal }];
     return [...amplified, ...emergent];
-  }, [wells, step, feedbackPhase, isPlaying, isPositive, positiveT, iterProgress, targetIdx]);
+  }, [wells, step, feedbackPhase, isPlaying, isPositive, positiveT, targetIdx, arrowPhaseGlobal, emergentPhaseGlobal]);
 
-  const curve = useMemo(() => buildEnergyCurve(energyWells), [energyWells]);
+  const baseCurve = useMemo(() => buildEnergyCurve(wells), [wells]);
+  const rawCurve = useMemo(() => buildEnergyCurve(energyWells), [energyWells]);
+  const normMin = useMemo(
+    () => lerp(baseCurve.Emin, Math.min(baseCurve.Emin, rawCurve.Emin), emergentPhaseGlobal * 0.85),
+    [baseCurve.Emin, rawCurve.Emin, emergentPhaseGlobal]
+  );
+  const normMax = useMemo(
+    () => lerp(baseCurve.Emax, Math.max(baseCurve.Emax, rawCurve.Emax), emergentPhaseGlobal * 0.35),
+    [baseCurve.Emax, rawCurve.Emax, emergentPhaseGlobal]
+  );
+  const curve = useMemo(
+    () => buildEnergyCurve(energyWells, { min: normMin, max: normMax }),
+    [energyWells, normMin, normMax]
+  );
   // 表示用: 谷を下・山を上にする（En は低E=小→谷なので、1-En で y は下が正の SVG で谷が下に）
   const EnDisplay = useMemo(() => curve.En.map((e) => 1 - e), [curve.En]);
 
@@ -418,23 +450,21 @@ export default function FeedbackAssociativeMemoryClean() {
   const sNow = lerp(s0, isPositive ? s1Positive : s1, t);
 
   const ballXY = useMemo(() => {
-    const idx = Math.round(sNow * 220);
     const x = energyBox.x + energyAxisGap + sNow * (energyBox.w - energyAxisGap);
     const y =
       energyBox.y +
       energyTopPad +
-      EnDisplay[clamp(idx, 0, EnDisplay.length - 1)] * (energyH - energyAxisGap);
+      sampleLinear(EnDisplay, sNow) * (energyH - energyAxisGap);
     return { x, y };
   }, [sNow, EnDisplay, energyBox.x, energyBox.y, energyBox.w, energyH, energyAxisGap]);
 
   const valleyDots = useMemo(() => {
     return energyWells.map((w) => {
-      const idx = Math.round(w.mu * 220);
       const x = energyBox.x + energyAxisGap + w.mu * (energyBox.w - energyAxisGap);
       const y =
         energyBox.y +
         energyTopPad +
-        EnDisplay[clamp(idx, 0, EnDisplay.length - 1)] * (energyH - energyAxisGap);
+        sampleLinear(EnDisplay, w.mu) * (energyH - energyAxisGap);
       return { x, y };
     });
   }, [energyWells, EnDisplay, energyBox.x, energyBox.y, energyBox.w, energyH, energyAxisGap]);
