@@ -752,7 +752,7 @@ export default function FeedbackAssociativeMemoryClean() {
         {/* energy landscape */}
         <g>
           <text x={energyBox.x} y={energyBox.y - 5} fill="rgba(255,255,255,0.78)" fontSize="13" fontWeight="900">
-            {isPositive ? "地形が広がり、新しい谷が生まれる" : "更新ごとに谷（安定点）へ"}
+            {isPositive ? "性質が変化して新しい谷（安定点）へ" : "更新ごとに谷（安定点）へ"}
           </text>
           <rect
             x={energyBox.x - 20}
