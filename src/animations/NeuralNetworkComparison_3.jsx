@@ -177,8 +177,9 @@ export default function FeedbackAssociativeMemoryClean() {
 
   const t = step / (STEPS - 1); // 0..1
   const iterProgress = step + feedbackPhase;
-  const arrowPhaseGlobal = smoothstep((iterProgress - 3.2) / 2.8);
-  const emergentPhaseGlobal = smoothstep((iterProgress - 4.8) / 3.2);
+  // ポジティブ時の地形変化を後半集中させず、序盤から徐々に進行させる
+  const arrowPhaseGlobal = smoothstep((iterProgress - 1.2) / 5.6);
+  const emergentPhaseGlobal = smoothstep((iterProgress - 2.2) / 5.2);
 
   // ===== fixed “memories” (5x5) =====
   const memories = useMemo(() => {
