@@ -162,6 +162,7 @@ export default function FeedbackAssociativeMemoryClean() {
   }, [isPlaying, step, hasFinished]);
 
   const t = step / (STEPS - 1); // 0..1
+  const iterProgress = step + feedbackPhase;
 
   // ===== fixed “memories” (5x5) =====
   const memories = useMemo(() => {
@@ -286,24 +287,24 @@ export default function FeedbackAssociativeMemoryClean() {
   );
   const stateDisplayGrid = useMemo(() => {
     if (!isPositive) return stateGrid;
-    const s = step + feedbackPhase; // continuous iteration
-    if (s <= 2) {
-      const u = clamp(s / 2, 0, 1);
+    const s = iterProgress; // continuous iteration
+    if (s <= 3) {
+      const u = clamp(s / 3, 0, 1);
       return stateGrid.map((row, r) =>
         row.map((v, c) => lerp(v, targetGrid[r][c], u))
       );
     }
-    if (s <= 5) {
-      const u = clamp((s - 2) / 3, 0, 1);
+    if (s <= 6) {
+      const u = clamp((s - 3) / 3, 0, 1);
       return targetGrid.map((row, r) =>
         row.map((v, c) => lerp(v, arrowGrid[r][c], u))
       );
     }
-    const u = clamp((s - 5) / 3, 0, 1);
+    const u = clamp((s - 6) / 2, 0, 1);
     return arrowGrid.map((row, r) =>
       row.map((v, c) => lerp(v, emergentGrid[r][c], u))
     );
-  }, [isPositive, stateGrid, targetGrid, arrowGrid, emergentGrid, step, feedbackPhase]);
+  }, [isPositive, stateGrid, targetGrid, arrowGrid, emergentGrid, iterProgress]);
   const memoryIcons = useMemo(() => {
     if (!isPositive) return memories;
     return [...memories, emergentPattern];
@@ -337,6 +338,8 @@ export default function FeedbackAssociativeMemoryClean() {
     if (!isPositive) return wells;
 
     const phase = isPlaying ? feedbackPhase : 0;
+    const arrowPhase = clamp((iterProgress - 3) / 3, 0, 1);
+    const emergentPhase = clamp((iterProgress - 6) / 2, 0, 1);
     const base = wells.map((w, i) => {
       const drift = 0.003 * Math.sin(0.75 * step + i * 1.3 + phase * Math.PI * 1.5);
       const ampShift = 1 + 0.022 * Math.sin(0.55 * step + i * 1.7 + phase * Math.PI);
@@ -350,18 +353,25 @@ export default function FeedbackAssociativeMemoryClean() {
 
     const spread = positiveT;
     const amplified = base.map((w, i) => {
-      const widen = 1 + 0.25 * spread;
-      const flatten = 1 - (i === 3 ? 0.05 : 0.20) * spread;
+      const widen = i === targetIdx ? 1 + 0.28 * spread : 1 + 0.12 * spread;
       const shift = 0.006 * Math.sin(step * 0.5 + i);
+      const depthScaleBase =
+        i === targetIdx
+          ? 1 - 0.58 * spread // 元の正解谷は明確に浅くする
+          : i === 3
+            ? 1 - 0.08 * spread // 矢印谷は軽微に弱めるだけ
+            : 1 - 0.18 * spread; // 競合谷は相対的に弱める
+      const arrowBoost = i === 3 ? 1 + 0.62 * arrowPhase : 1;
+      const arrowNarrow = i === 3 ? 1 - 0.18 * arrowPhase : 1;
       return {
         mu: w.mu + shift,
-        width: w.width * (i === 3 ? 0.85 : widen),
-        amp: w.amp * flatten,
+        width: w.width * (i === 3 ? 0.85 * arrowNarrow : widen),
+        amp: w.amp * depthScaleBase * arrowBoost,
       };
     });
-    const emergent = [{ mu: 0.98, width: 0.045, amp: -1.20 * spread }];
+    const emergent = [{ mu: 0.98, width: 0.04, amp: -1.35 * emergentPhase }];
     return [...amplified, ...emergent];
-  }, [wells, step, feedbackPhase, isPlaying, isPositive, positiveT]);
+  }, [wells, step, feedbackPhase, isPlaying, isPositive, positiveT, iterProgress, targetIdx]);
 
   const curve = useMemo(() => buildEnergyCurve(energyWells), [energyWells]);
   // 表示用: 谷を下・山を上にする（En は低E=小→谷なので、1-En で y は下が正の SVG で谷が下に）
