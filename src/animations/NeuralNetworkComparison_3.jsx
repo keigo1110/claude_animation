@@ -382,21 +382,23 @@ export default function FeedbackAssociativeMemoryClean() {
   const stateRight = stateX + gridCell * 5 + 10;
   const memoryLeft = memoryX - 10;
 
-  const energyBox = { x: 50, y: 370, w: 860, h: 220 };
-  const energyTopPad = 26;
-  const energyH = energyBox.h - energyTopPad - 12;
+  const energyBox = { x: 50, y: 370, w: 864, h: 220 };
+  const energyTopPad = 20;
+  const energyH = energyBox.h - energyTopPad - 30;
+  const energyXAxisOffset = 50; // x軸（横線・ラベル）だけを下にずらす量（px）
+  const energyAxisGap = 8; // 軸とグラフ線の隙間（px）
 
   const pathD = useMemo(
     () =>
       pathFromCurve(
         curve.xs,
         EnDisplay,
-        energyBox.x,
+        energyBox.x + energyAxisGap,
         energyBox.y + energyTopPad,
-        energyBox.w,
-        energyH
+        energyBox.w - energyAxisGap,
+        energyH - energyAxisGap
       ),
-    [curve.xs, EnDisplay, energyBox.x, energyBox.y, energyBox.w, energyH]
+    [curve.xs, EnDisplay, energyBox.x, energyBox.y, energyBox.w, energyH, energyAxisGap]
   );
 
   // ball moves monotonically along one valley side: s(t) from 0.58 -> 0.68
@@ -407,25 +409,25 @@ export default function FeedbackAssociativeMemoryClean() {
 
   const ballXY = useMemo(() => {
     const idx = Math.round(sNow * 220);
-    const x = energyBox.x + sNow * energyBox.w;
+    const x = energyBox.x + energyAxisGap + sNow * (energyBox.w - energyAxisGap);
     const y =
       energyBox.y +
       energyTopPad +
-      EnDisplay[clamp(idx, 0, EnDisplay.length - 1)] * energyH;
+      EnDisplay[clamp(idx, 0, EnDisplay.length - 1)] * (energyH - energyAxisGap);
     return { x, y };
-  }, [sNow, EnDisplay, energyBox.x, energyBox.y, energyBox.w, energyH]);
+  }, [sNow, EnDisplay, energyBox.x, energyBox.y, energyBox.w, energyH, energyAxisGap]);
 
   const valleyDots = useMemo(() => {
     return energyWells.map((w) => {
       const idx = Math.round(w.mu * 220);
-      const x = energyBox.x + w.mu * energyBox.w;
+      const x = energyBox.x + energyAxisGap + w.mu * (energyBox.w - energyAxisGap);
       const y =
         energyBox.y +
         energyTopPad +
-        EnDisplay[clamp(idx, 0, EnDisplay.length - 1)] * energyH;
+        EnDisplay[clamp(idx, 0, EnDisplay.length - 1)] * (energyH - energyAxisGap);
       return { x, y };
     });
-  }, [energyWells, EnDisplay, energyBox.x, energyBox.y, energyBox.w, energyH]);
+  }, [energyWells, EnDisplay, energyBox.x, energyBox.y, energyBox.w, energyH, energyAxisGap]);
 
   const loopPulse = isPlaying ? 0.35 + 0.65 * (step % 2) : 0.35;
   const feedbackLoop = useMemo(() => {
@@ -605,6 +607,12 @@ export default function FeedbackAssociativeMemoryClean() {
           <marker id="feedbackArrowSmall" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="userSpaceOnUse">
             <path d="M0,0 L0,6 L8,3 z" fill="rgba(255,180,100,0.85)" />
           </marker>
+          <marker id="axisArrow" markerWidth="9" markerHeight="9" refX="7.5" refY="3.5" orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0,0 L0,7 L7.5,3.5 z" fill="rgba(255,255,255,0.42)" />
+          </marker>
+          <marker id="noiseArrow" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0,0 L0,8 L10,4 z" fill="rgba(255,195,135,0.98)" stroke="rgba(20,12,8,0.55)" strokeWidth="0.7" />
+          </marker>
         </defs>
 
         {/* background card */}
@@ -665,9 +673,9 @@ export default function FeedbackAssociativeMemoryClean() {
             y1={interferenceArrow.sy}
             x2={interferenceArrow.tx}
             y2={interferenceArrow.ty}
-            stroke={`rgba(255,150,90,${0.25 + 0.35 * interferenceArrow.a})`}
-            strokeWidth="2"
-            markerEnd="url(#feedbackArrowSmall)"
+            stroke={`rgba(255,165,105,${0.35 + 0.40 * interferenceArrow.a})`}
+            strokeWidth="2.4"
+            markerEnd="url(#noiseArrow)"
           />
           <text
             x={interferenceArrow.sx + 10}
@@ -714,6 +722,45 @@ export default function FeedbackAssociativeMemoryClean() {
             fill="rgba(0,0,0,0.18)"
             stroke="rgba(255,255,255,0.10)"
           />
+          {/* axes */}
+          <line
+            x1={energyBox.x}
+            y1={energyBox.y + energyTopPad + energyH + energyXAxisOffset}
+            x2={energyBox.x}
+            y2={energyBox.y + energyTopPad}
+            stroke="rgba(255,255,255,0.22)"
+            strokeWidth="1.2"
+            markerEnd="url(#axisArrow)"
+          />
+          <line
+            x1={energyBox.x}
+            y1={energyBox.y + energyTopPad + energyH + energyXAxisOffset}
+            x2={energyBox.x + energyBox.w}
+            y2={energyBox.y + energyTopPad + energyH + energyXAxisOffset}
+            stroke="rgba(255,255,255,0.22)"
+            strokeWidth="1.2"
+            markerEnd="url(#axisArrow)"
+          />
+          <text
+            x={energyBox.x}
+            y={energyBox.y + energyTopPad + energyH / 2 +27}
+            textAnchor="middle"
+            transform={`rotate(-90 ${energyBox.x - 34} ${energyBox.y + energyTopPad + energyH / 2})`}
+            fill="rgba(255,255,255,0.55)"
+            fontSize="12"
+            fontWeight="700"
+          >
+          不安定さ
+          </text>
+          <text
+            x={energyBox.x + energyBox.w - 36}
+            y={energyBox.y + energyTopPad + energyH + 18 + energyXAxisOffset}
+            fill="rgba(255,255,255,0.55)"
+            fontSize="12"
+            fontWeight="700"
+          >
+            状態
+          </text>
           <path d={pathD} fill="none" stroke="rgba(255,200,150,0.44)" strokeWidth="2.2" />
 
           {/* 各谷の位置の下側に記憶の記号を配置（曲線と重ならないよう下にオフセット） */}
