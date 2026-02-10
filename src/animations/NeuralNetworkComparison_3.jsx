@@ -334,6 +334,8 @@ export default function FeedbackAssociativeMemoryClean() {
   );
 
   const energyWells = useMemo(() => {
+    if (!isPositive) return wells;
+
     const phase = isPlaying ? feedbackPhase : 0;
     const base = wells.map((w, i) => {
       const drift = 0.003 * Math.sin(0.75 * step + i * 1.3 + phase * Math.PI * 1.5);
@@ -345,8 +347,6 @@ export default function FeedbackAssociativeMemoryClean() {
         amp: w.amp * ampShift,
       };
     });
-
-    if (!isPositive) return base;
 
     const spread = positiveT;
     const amplified = base.map((w, i) => {
@@ -479,8 +479,8 @@ export default function FeedbackAssociativeMemoryClean() {
     });
   }, [feedbackPointAt, feedbackPhase, step]);
   const interferenceArrow = useMemo(() => {
-    const target = feedbackPointAt(0.32);
-    const rawSourceX = memoryX + gridSize + 90;
+    const target = { x: stateX - 10, y: gridY + gridCell * 1.0 };
+    const rawSourceX = cueRight - 20;
     const source = { x: lerp(rawSourceX, target.x, 0.5), y: target.y };
     const phase = feedbackPhase;
     const tIn = clamp(phase, 0, 1);
@@ -493,7 +493,7 @@ export default function FeedbackAssociativeMemoryClean() {
       py: lerp(source.y, target.y, tIn),
       a: 0.25 + 0.55 * Math.sin(phase * Math.PI),
     };
-  }, [feedbackPointAt, feedbackPhase, memoryX, gridSize, gridY]);
+  }, [feedbackPhase, gridY, stateX, gridCell, cueRight]);
 
   return (
     <div
