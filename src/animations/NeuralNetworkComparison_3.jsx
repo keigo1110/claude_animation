@@ -498,14 +498,18 @@ export default function FeedbackAssociativeMemoryClean() {
             color: "#fff",
             border: "none",
             padding: "12px 26px",
+            width: 150,
+            height: 46,
             borderRadius: 28,
             fontSize: 15,
             fontWeight: 900,
             cursor: isPlaying && !hasFinished ? "not-allowed" : "pointer",
             display: "flex",
             alignItems: "center",
+            justifyContent: "center",
             gap: 10,
             boxShadow: isPlaying && !hasFinished ? "none" : "0 6px 22px rgba(255,107,60,0.32)",
+            lineHeight: 1,
           }}
         >
           {isPlaying && !hasFinished ? (
