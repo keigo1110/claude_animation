@@ -104,18 +104,17 @@ export default function FeedbackAssociativeMemoryClean() {
   // ===== playback =====
   const STEPS = 9; // 0..8
   const INTERVAL = 720;
+  const TOTAL_DURATION = (STEPS - 1) * INTERVAL;
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasFinished, setHasFinished] = useState(false);
-  const [step, setStep] = useState(0);
+  const [animProgress, setAnimProgress] = useState(0); // 0..TOTAL_DURATION (ms)
   const [mode, setMode] = useState("negative");
-  const timerRef = useRef(null);
-  const feedbackRafRef = useRef(null);
-  const feedbackStartRef = useRef(0);
-  const [feedbackPhase, setFeedbackPhase] = useState(0);
+  const rafRef = useRef(null);
+  const animStartRef = useRef(0);
 
   const resetDemo = useCallback(() => {
-    setStep(0);
+    setAnimProgress(0);
     setHasFinished(false);
   }, []);
 
@@ -124,54 +123,43 @@ export default function FeedbackAssociativeMemoryClean() {
     setIsPlaying(true);
   }, [resetDemo]);
 
-  useEffect(() => {
-    if (!isPlaying) return;
-    timerRef.current = setInterval(() => {
-      setStep((s) => {
-        const nx = s + 1;
-        if (nx >= STEPS) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
-          setIsPlaying(false);
-          setHasFinished(true);
-          return STEPS - 1;
-        }
-        return nx;
-      });
-    }, INTERVAL);
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      timerRef.current = null;
-    };
-  }, [isPlaying]);
-
+  // 単一の rAF ループで全タイミングを駆動（二重タイマーによる非同期を排除）
   useEffect(() => {
     if (!isPlaying) {
-      setFeedbackPhase(hasFinished ? 1 : 0);
-      if (feedbackRafRef.current) cancelAnimationFrame(feedbackRafRef.current);
-      feedbackRafRef.current = null;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
       return;
     }
 
-    feedbackStartRef.current = performance.now();
+    animStartRef.current = performance.now();
     const tick = (now) => {
-      const elapsed = now - feedbackStartRef.current;
-      const phase = clamp(elapsed / INTERVAL, 0, 1);
-      setFeedbackPhase(phase);
-      if (phase < 1) {
-        feedbackRafRef.current = requestAnimationFrame(tick);
+      const elapsed = now - animStartRef.current;
+      if (elapsed >= TOTAL_DURATION) {
+        setAnimProgress(TOTAL_DURATION);
+        setIsPlaying(false);
+        setHasFinished(true);
+        rafRef.current = null;
+        return;
       }
+      setAnimProgress(elapsed);
+      rafRef.current = requestAnimationFrame(tick);
     };
-    feedbackRafRef.current = requestAnimationFrame(tick);
+    rafRef.current = requestAnimationFrame(tick);
 
     return () => {
-      if (feedbackRafRef.current) cancelAnimationFrame(feedbackRafRef.current);
-      feedbackRafRef.current = null;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
     };
-  }, [isPlaying, step, hasFinished]);
+  }, [isPlaying]);
 
-  const t = step / (STEPS - 1); // 0..1
+  // 全タイミングを animProgress から導出（単一ソース）
+  const step = hasFinished
+    ? STEPS - 1
+    : Math.min(Math.floor(animProgress / INTERVAL), STEPS - 1);
+  const feedbackPhase = hasFinished
+    ? 1
+    : clamp((animProgress % INTERVAL) / INTERVAL, 0, 1);
+  const tSmooth = clamp(animProgress / TOTAL_DURATION, 0, 1);
   // ===== fixed “memories” (5x5) =====
   const memories = useMemo(() => {
     // 0/1 patterns
@@ -257,7 +245,7 @@ export default function FeedbackAssociativeMemoryClean() {
 
   const isPositive = mode === "positive";
   // PF単体の説明として、増幅は示しつつ「山を越える前」で止める
-  const positiveT = isPositive ? clamp((step + feedbackPhase) / (STEPS - 1), 0, 0.68) : 0;
+  const positiveT = isPositive ? clamp(tSmooth, 0, 0.68) : 0;
   const modeLabel = isPositive ? "ポジティブフィードバック" : "ネガティブフィードバック";
   const modeDescription = isPositive
     ? "自己強化で小さなずれが増幅し、状態が谷底から坂を登り始める"
@@ -279,17 +267,23 @@ export default function FeedbackAssociativeMemoryClean() {
   const stateDisplayGrid = useMemo(() => {
     if (!isPositive) return stateGrid;
 
-    // PF単体: 安定点(谷底)付近の状態から、小さなずれが増幅して未収束化する。
-    const awayFromValley = 0.42 * positiveT;
-    const seedGain = 0.03 + 0.22 * positiveT * positiveT;
-    const noiseAmp = 0.01 + 0.06 * positiveT;
+    // PF: ボールと同じ2フェーズ
+    // フェーズ1 (positiveT < ~0.27): 谷底付近で微小揺らぎ
+    // フェーズ2 (positiveT > ~0.27): ずれが増幅して崩れ始める
+    const wobblePhase = clamp(positiveT / 0.27, 0, 1); // 0..1 in wobble zone
+    const climbPhase = clamp((positiveT - 0.27) / 0.41, 0, 1); // 0..1 in climb zone
+
+    const noiseAmp = 0.005 + 0.025 * wobblePhase;
+    const awayFromValley = 0.38 * climbPhase;
+    const seedGain = 0.02 * wobblePhase + 0.20 * climbPhase * climbPhase;
+
     return targetGrid.map((row, r) =>
       row.map((base, c) => {
-        const relaxed = lerp(base, 0.5, awayFromValley);
-        const seeded = relaxed + pfSeedOffsets[r][c] * seedGain;
         const noise =
           noiseAmp *
           Math.sin(1.05 * step + feedbackPhase * Math.PI * 2 + r * 1.7 + c * 2.3);
+        const relaxed = lerp(base, 0.5, awayFromValley);
+        const seeded = relaxed + pfSeedOffsets[r][c] * seedGain;
         return clamp(seeded + noise, 0.03, 0.97);
       })
     );
@@ -300,8 +294,10 @@ export default function FeedbackAssociativeMemoryClean() {
       return target.map((row) => row.map((v) => (v ? 0.95 : 0.06)));
     }
 
-    const amplify = 0.03 + 0.14 * positiveT;
-    const flickerAmp = 0.03 + 0.07 * positiveT;
+    // 右パネル: 中央パネルをさらに一歩先まで増幅した「先読み」的表示
+    const climbPhase = clamp((positiveT - 0.27) / 0.41, 0, 1);
+    const amplify = 0.02 + 0.12 * climbPhase;
+    const flickerAmp = 0.01 + 0.06 * climbPhase;
     return stateDisplayGrid.map((row, r) =>
       row.map((v, c) => {
         const centered = v - 0.5;
@@ -367,13 +363,30 @@ export default function FeedbackAssociativeMemoryClean() {
   );
 
   // ball movement:
-  // - negative: 谷へ下る
-  // - positive(PF): 同じランドスケープ上で谷を登る
+  // - negative: 谷へ下る (s0→s1)
+  // - positive(PF): 谷底で左右に揺れ、増幅されて坂を登り始める
   const s0 = 0.58;
-  const s1 = 0.68;
-  const s0Positive = 0.68;
-  const s1Positive = 0.765;
-  const sNow = isPositive ? lerp(s0Positive, s1Positive, t) : lerp(s0, s1, t);
+  const s1 = 0.68; // target valley center
+  const sNow = useMemo(() => {
+    if (!isPositive) return lerp(s0, s1, tSmooth);
+
+    // PF: 一つの連続した振動の振幅が指数的に増大する。
+    // フェーズ分岐なし。振動が大きくなった結果として谷を離れる。
+    const valleyCenter = 0.68;
+    const ampMin = 0.008;
+    const ampMax = 0.075;
+    const driftMax = 0.01; // 振動中心がわずかに上へ偏る（非対称増幅）
+    const expK = 3.0;
+    const expGrowth = (Math.exp(expK * tSmooth) - 1) / (Math.exp(expK) - 1);
+    const amp = ampMin + (ampMax - ampMin) * expGrowth;
+    const drift = driftMax * expGrowth;
+
+    // freq=3.25 → アニメ終了時に正のピーク（谷から最も離れた位置）で止まる
+    const freq = 3.25;
+    const osc = Math.sin(tSmooth * freq * Math.PI * 2);
+
+    return valleyCenter + drift + osc * amp;
+  }, [isPositive, tSmooth]);
 
   const ballXY = useMemo(() => {
     const x = energyBox.x + energyAxisGap + sNow * (energyBox.w - energyAxisGap);
@@ -600,7 +613,7 @@ export default function FeedbackAssociativeMemoryClean() {
 
         {/* arrows */}
         <line x1={cueRight} y1={arrowY} x2={stateLeft} y2={arrowY} stroke="rgba(255,200,150,0.65)" strokeWidth="2.4" markerEnd="url(#arrow)" />
-        <line x1={stateRight} y1={arrowY} x2={memoryLeft} y2={arrowY} stroke={`rgba(255,220,180,${0.25 + 0.60 * t})`} strokeWidth="2.4" markerEnd="url(#arrow)" />
+        <line x1={stateRight} y1={arrowY} x2={memoryLeft} y2={arrowY} stroke={`rgba(255,220,180,${0.25 + 0.60 * tSmooth})`} strokeWidth="2.4" markerEnd="url(#arrow)" />
         {isPositive && null}
 
         {/* feedback loop：前向き矢印(y=190)・グリッドと重ならないようループを下に大きく取り、縁取りで視認性確保 */}
