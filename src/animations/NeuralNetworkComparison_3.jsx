@@ -9,10 +9,6 @@ export const animationMeta = {
 // ===== tiny helpers =====
 const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const lerp = (a, b, t) => a + (b - a) * t;
-const smoothstep = (u) => {
-  const t = clamp(u, 0, 1);
-  return t * t * (3 - 2 * t);
-};
 const sampleLinear = (arr, t01) => {
   const n = arr.length - 1;
   const p = clamp(t01, 0, 1) * n;
@@ -176,11 +172,6 @@ export default function FeedbackAssociativeMemoryClean() {
   }, [isPlaying, step, hasFinished]);
 
   const t = step / (STEPS - 1); // 0..1
-  const iterProgress = step + feedbackPhase;
-  // ポジティブ時の地形変化を後半集中させず、序盤から徐々に進行させる
-  const arrowPhaseGlobal = smoothstep((iterProgress - 1.2) / 5.6);
-  const emergentPhaseGlobal = smoothstep((iterProgress - 2.2) / 5.2);
-
   // ===== fixed “memories” (5x5) =====
   const memories = useMemo(() => {
     // 0/1 patterns
@@ -265,80 +256,63 @@ export default function FeedbackAssociativeMemoryClean() {
   }, [cue, target, step]);
 
   const isPositive = mode === "positive";
-  const positiveT = isPositive ? clamp((step + feedbackPhase) / (STEPS - 1), 0, 1) : 0;
+  // PF単体の説明として、増幅は示しつつ「山を越える前」で止める
+  const positiveT = isPositive ? clamp((step + feedbackPhase) / (STEPS - 1), 0, 0.68) : 0;
   const modeLabel = isPositive ? "ポジティブフィードバック" : "ネガティブフィードバック";
   const modeDescription = isPositive
-    ? "増幅が自己強化され、複数の安定点が生まれて新しいパターンが創発する"
+    ? "自己強化で小さなずれが増幅し、状態が谷底から坂を登り始める"
     : "反復更新で energy が下がり、単一の谷（安定点）に収束して補完される";
-  const emergentPattern = useMemo(
-    () => [
-      [1, 1, 0, 1, 1],
-      [1, 0, 1, 0, 1],
-      [0, 1, 1, 1, 0],
-      [1, 0, 1, 0, 1],
-      [1, 1, 0, 1, 1],
-    ],
-    []
-  );
-  const arrowPattern = useMemo(
-    () => [
-      [0, 0, 1, 0, 0],
-      [0, 1, 1, 1, 0],
-      [1, 0, 1, 0, 1],
-      [0, 0, 1, 0, 0],
-      [0, 0, 1, 0, 0],
-    ],
-    []
-  );
   const targetGrid = useMemo(
     () => target.map((row) => row.map((v) => (v ? 0.95 : 0.06))),
     [target]
   );
-  const arrowGrid = useMemo(
-    () => arrowPattern.map((row) => row.map((v) => (v ? 0.98 : 0.04))),
-    [arrowPattern]
-  );
-  const emergentGrid = useMemo(
-    () => emergentPattern.map((row) => row.map((v) => (v ? 0.98 : 0.04))),
-    [emergentPattern]
+  const pfSeedOffsets = useMemo(
+    () => [
+      [0.22, -0.18, 0.10, -0.14, 0.16],
+      [-0.12, 0.26, -0.08, 0.20, -0.16],
+      [0.14, -0.10, 0.18, -0.06, 0.12],
+      [-0.18, 0.12, -0.20, 0.24, -0.10],
+      [0.16, -0.14, 0.08, -0.12, 0.22],
+    ],
+    []
   );
   const stateDisplayGrid = useMemo(() => {
     if (!isPositive) return stateGrid;
-    const s = iterProgress; // continuous iteration
-    if (s <= 3) {
-      const u = clamp(s / 3, 0, 1);
-      return stateGrid.map((row, r) =>
-        row.map((v, c) => lerp(v, targetGrid[r][c], u))
-      );
-    }
-    if (s <= 6) {
-      const u = clamp((s - 3) / 3, 0, 1);
-      return targetGrid.map((row, r) =>
-        row.map((v, c) => lerp(v, arrowGrid[r][c], u))
-      );
-    }
-    const u = clamp((s - 6) / 2, 0, 1);
-    return arrowGrid.map((row, r) =>
-      row.map((v, c) => lerp(v, emergentGrid[r][c], u))
+
+    // PF単体: 安定点(谷底)付近の状態から、小さなずれが増幅して未収束化する。
+    const awayFromValley = 0.42 * positiveT;
+    const seedGain = 0.03 + 0.22 * positiveT * positiveT;
+    const noiseAmp = 0.01 + 0.06 * positiveT;
+    return targetGrid.map((row, r) =>
+      row.map((base, c) => {
+        const relaxed = lerp(base, 0.5, awayFromValley);
+        const seeded = relaxed + pfSeedOffsets[r][c] * seedGain;
+        const noise =
+          noiseAmp *
+          Math.sin(1.05 * step + feedbackPhase * Math.PI * 2 + r * 1.7 + c * 2.3);
+        return clamp(seeded + noise, 0.03, 0.97);
+      })
     );
-  }, [isPositive, stateGrid, targetGrid, arrowGrid, emergentGrid, iterProgress]);
-  const memoryIcons = useMemo(() => {
-    if (!isPositive) return memories;
-    return [...memories, emergentPattern];
-  }, [isPositive, memories, emergentPattern]);
-  const emergentMemoryGrid = useMemo(() => {
+  }, [isPositive, stateGrid, targetGrid, pfSeedOffsets, positiveT, step, feedbackPhase]);
+  const memoryIcons = useMemo(() => memories, [memories]);
+  const amplifiedStateGrid = useMemo(() => {
     if (!isPositive) {
       return target.map((row) => row.map((v) => (v ? 0.95 : 0.06)));
     }
-    const ease = clamp(positiveT * positiveT * 1.15, 0, 1);
-    return target.map((row, r) =>
+
+    const amplify = 0.03 + 0.14 * positiveT;
+    const flickerAmp = 0.03 + 0.07 * positiveT;
+    return stateDisplayGrid.map((row, r) =>
       row.map((v, c) => {
-        const base = v ? 0.95 : 0.06;
-        const em = emergentPattern[r][c] ? 0.98 : 0.04;
-        return lerp(base, em, ease);
+        const centered = v - 0.5;
+        const spread = 0.5 + centered * (1 + amplify);
+        const flicker =
+          flickerAmp *
+          Math.sin(1.3 * step + feedbackPhase * Math.PI * 2 + r * 2.1 + c * 1.6);
+        return clamp(spread + flicker, 0.03, 0.97);
       })
     );
-  }, [isPositive, target, emergentPattern, positiveT]);
+  }, [isPositive, target, stateDisplayGrid, positiveT, step, feedbackPhase]);
 
   // ===== energy landscape (no waves, no jitter) =====
   const wells = useMemo(
@@ -351,62 +325,10 @@ export default function FeedbackAssociativeMemoryClean() {
     []
   );
 
-  const energyWells = useMemo(() => {
-    if (!isPositive) return wells;
+  // PF時もランドスケープは固定し、状態の遷移のみを示す
+  const energyWells = useMemo(() => wells, [wells]);
 
-    const phase = isPlaying ? feedbackPhase : 0;
-    const base = wells.map((w, i) => {
-      const drift = 0.003 * Math.sin(0.75 * step + i * 1.3 + phase * Math.PI * 1.5);
-      const ampShift = 1 + 0.022 * Math.sin(0.55 * step + i * 1.7 + phase * Math.PI);
-      const widthShift = 1 + 0.02 * Math.cos(0.45 * step + i * 1.1 - phase * Math.PI);
-      return {
-        mu: w.mu + drift,
-        width: w.width * widthShift,
-        amp: w.amp * ampShift,
-      };
-    });
-
-    const spread = positiveT;
-    const amplified = base.map((w, i) => {
-      const widen =
-        i < 2
-          ? 1 + 0.02 * spread // 左2谷は軽く揺れるだけ
-          : i === targetIdx
-            ? 1 + 0.28 * spread
-            : 1 + 0.12 * spread;
-      const shift = (i < 2 ? 0.0025 : 0.006) * Math.sin(step * 0.5 + i);
-      const depthScaleBase =
-        i === targetIdx
-          ? 1 - 0.58 * spread // 元の正解谷は明確に浅くする
-          : i === 3
-            ? 1 - 0.08 * spread // 矢印谷は軽微に弱めるだけ
-            : 1; // 左側の既存谷は維持（不要に浅くしない）
-      const arrowBoost = i === 3 ? 1 + 0.62 * arrowPhaseGlobal : 1;
-      const arrowNarrow = i === 3 ? 1 - 0.18 * arrowPhaseGlobal : 1;
-      return {
-        mu: w.mu + shift,
-        width: w.width * (i === 3 ? 0.85 * arrowNarrow : widen),
-        amp: w.amp * depthScaleBase * arrowBoost,
-      };
-    });
-    const emergent = [{ mu: 0.98, width: 0.04, amp: -1.35 * emergentPhaseGlobal }];
-    return [...amplified, ...emergent];
-  }, [wells, step, feedbackPhase, isPlaying, isPositive, positiveT, targetIdx, arrowPhaseGlobal, emergentPhaseGlobal]);
-
-  const baseCurve = useMemo(() => buildEnergyCurve(wells), [wells]);
-  const rawCurve = useMemo(() => buildEnergyCurve(energyWells), [energyWells]);
-  const normMin = useMemo(
-    () => lerp(baseCurve.Emin, Math.min(baseCurve.Emin, rawCurve.Emin), emergentPhaseGlobal * 0.85),
-    [baseCurve.Emin, rawCurve.Emin, emergentPhaseGlobal]
-  );
-  const normMax = useMemo(
-    () => lerp(baseCurve.Emax, Math.max(baseCurve.Emax, rawCurve.Emax), emergentPhaseGlobal * 0.35),
-    [baseCurve.Emax, rawCurve.Emax, emergentPhaseGlobal]
-  );
-  const curve = useMemo(
-    () => buildEnergyCurve(energyWells, { min: normMin, max: normMax }),
-    [energyWells, normMin, normMax]
-  );
+  const curve = useMemo(() => buildEnergyCurve(energyWells), [energyWells]);
   // 表示用: 谷を下・山を上にする（En は低E=小→谷なので、1-En で y は下が正の SVG で谷が下に）
   const EnDisplay = useMemo(() => curve.En.map((e) => 1 - e), [curve.En]);
 
@@ -444,11 +366,14 @@ export default function FeedbackAssociativeMemoryClean() {
     [curve.xs, EnDisplay, energyBox.x, energyBox.y, energyBox.w, energyH, energyAxisGap]
   );
 
-  // ball moves monotonically along one valley side: s(t) from 0.58 -> 0.68
+  // ball movement:
+  // - negative: 谷へ下る
+  // - positive(PF): 同じランドスケープ上で谷を登る
   const s0 = 0.58;
   const s1 = 0.68;
-  const s1Positive = 0.98;
-  const sNow = lerp(s0, isPositive ? s1Positive : s1, t);
+  const s0Positive = 0.68;
+  const s1Positive = 0.765;
+  const sNow = isPositive ? lerp(s0Positive, s1Positive, t) : lerp(s0, s1, t);
 
   const ballXY = useMemo(() => {
     const x = energyBox.x + energyAxisGap + sNow * (energyBox.w - energyAxisGap);
@@ -669,8 +594,8 @@ export default function FeedbackAssociativeMemoryClean() {
         <PixelGrid x={stateX} y={gridY} cell={gridCell} grid={stateDisplayGrid} label={step < 2 ? "状態（初期）" : "状態（反復で更新）"} accent="rgba(255,220,180,1)" glow={isPlaying ? 0.6 : hasFinished ? 0.8 : 0.2} />
         {isPositive && null}
 
-        {/* right: converged memory */}
-        <PixelGrid x={memoryX} y={gridY} cell={gridCell} grid={emergentMemoryGrid} label={isPositive ? "記憶（新パターン生成）" : "記憶（安定点）"} accent="rgba(255,240,210,1)" glow={hasFinished ? 0.9 : 0.2} />
+        {/* right: post-amplification state (still unstable) */}
+        <PixelGrid x={memoryX} y={gridY} cell={gridCell} grid={amplifiedStateGrid} label={isPositive ? "状態（増幅中）" : "記憶（安定点）"} accent="rgba(255,240,210,1)" glow={hasFinished ? 0.9 : 0.2} />
         {isPositive && null}
 
         {/* arrows */}
@@ -752,7 +677,7 @@ export default function FeedbackAssociativeMemoryClean() {
         {/* energy landscape */}
         <g>
           <text x={energyBox.x} y={energyBox.y - 5} fill="rgba(255,255,255,0.78)" fontSize="13" fontWeight="900">
-            {isPositive ? "性質が変化して新しい谷（安定点）へ" : "更新ごとに谷（安定点）へ"}
+            {isPositive ? "小さなずれが増幅する" : "更新ごとに谷（安定点）へ"}
           </text>
           <rect
             x={energyBox.x - 20}
