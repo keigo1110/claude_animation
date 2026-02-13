@@ -368,7 +368,17 @@ export default function FeedbackAssociativeMemoryClean() {
   const s0 = 0.58;
   const s1 = 0.68; // target valley center
   const sNow = useMemo(() => {
-    if (!isPositive) return lerp(s0, s1, tSmooth);
+    if (!isPositive) {
+      // NF: 1 feedback ごとに 1 ノッチ進む。
+      // 各周期の前半で移動し、後半は一瞬停止して更新タイミングを見せる。
+      const totalTicks = STEPS - 1; // 8 ticks
+      const tickSize = (s1 - s0) / totalTicks;
+      const tickIndex = Math.min(step, totalTicks - 1);
+      const moveWindow = 0.64; // 周期の64%で移動、残りでブレーキ
+      const u = clamp(feedbackPhase / moveWindow, 0, 1);
+      const eased = 1 - Math.pow(1 - u, 3); // ease-out
+      return s0 + (tickIndex + eased) * tickSize;
+    }
 
     // PF: 一つの連続した振動の振幅が指数的に増大する。
     // フェーズ分岐なし。振動が大きくなった結果として谷を離れる。
@@ -386,7 +396,7 @@ export default function FeedbackAssociativeMemoryClean() {
     const osc = Math.sin(tSmooth * freq * Math.PI * 2);
 
     return valleyCenter + drift + osc * amp;
-  }, [isPositive, tSmooth]);
+  }, [isPositive, tSmooth, step, feedbackPhase, STEPS]);
 
   const ballXY = useMemo(() => {
     const x = energyBox.x + energyAxisGap + sNow * (energyBox.w - energyAxisGap);
